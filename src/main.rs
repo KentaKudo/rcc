@@ -7,29 +7,33 @@ enum TokenKind {
     EOF,
 }
 
-#[derive(Debug, PartialEq)]
+impl Default for TokenKind {
+    fn default() -> Self {
+        TokenKind::EOF
+    }
+}
+
+#[derive(Debug, PartialEq, Default)]
 struct Token {
     kind: TokenKind,
     next: Option<Box<Token>>,
 }
 
 impl Token {
-    fn consume(&self, op: char) -> Option<&Token> {
-        if self.kind != TokenKind::Reserved(op) {
-            return None;
+    fn consume_reserved(&self) -> Result<(char, &Token), String> {
+        if let TokenKind::Reserved(c) = self.kind {
+            return Ok((c, self.next.as_ref().unwrap().as_ref()));
         }
 
-        self.next.as_ref().map(|t| t.as_ref())
+        Err("有効な文字ではありません".to_string())
     }
 
-    fn consume_number(&self) -> Option<(i64, &Token)> {
+    fn consume_number(&self) -> Result<(i64, &Token), String> {
         if let TokenKind::Num(nr) = self.kind {
-            if let Some(next) = self.next.as_ref() {
-                return Some((nr, next.as_ref()));
-            }
+            return Ok((nr, self.next.as_ref().unwrap().as_ref()));
         }
 
-        None
+        Err("数字ではありません".to_string())
     }
 
     fn is_eof(&self) -> bool {
@@ -44,10 +48,7 @@ impl Token {
 }
 
 fn tokenise(p: &str) -> Result<Token, String> {
-    let mut head = Token {
-        kind: TokenKind::EOF,
-        next: None,
-    };
+    let mut head = Token::default();
     let mut cur = &mut head;
 
     let mut input = p;
@@ -78,10 +79,7 @@ fn tokenise(p: &str) -> Result<Token, String> {
 
     cur.append(TokenKind::EOF);
 
-    Ok(match head.next {
-        Some(t) => *t,
-        None => head,
-    })
+    Ok(head.next.map(|b| *b).unwrap_or_default())
 }
 
 fn main() -> Result<(), String> {
@@ -96,30 +94,23 @@ fn main() -> Result<(), String> {
     println!(".globl main");
     println!("main:");
 
-    let (d, mut token) = token
-        .consume_number()
-        .ok_or("数ではありません".to_string())?;
+    let (d, mut token) = token.consume_number()?;
     println!("  mov rax, {}", d);
 
     while !token.is_eof() {
-        let next = match token.consume('+') {
-            Some(next) => {
-                let (d, next) = next
-                    .consume_number()
-                    .ok_or("数ではありません".to_string())?;
+        let (res, next) = token.consume_reserved()?;
+        let next = match res {
+            '+' => {
+                let (d, next) = next.consume_number()?;
                 println!("  add rax, {}", d);
                 next
             }
-            None => match token.consume('-') {
-                Some(next) => {
-                    let (d, next) = next
-                        .consume_number()
-                        .ok_or("数ではありません".to_string())?;
-                    println!("  sub rax, {}", d);
-                    next
-                }
-                None => return Err(format!("'{}'ではありません", '-')),
-            },
+            '-' => {
+                let (d, next) = next.consume_number()?;
+                println!("  sub rax, {}", d);
+                next
+            }
+            _ => return Err(format!("予期しない文字です: {}", res)),
         };
 
         token = next;
