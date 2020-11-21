@@ -6,6 +6,7 @@ use std::str;
 #[derive(Debug, PartialEq, Default, Copy, Clone)]
 struct Location(u64);
 
+// TODO: rename
 #[derive(Debug)]
 struct CustomError(String, Location);
 
@@ -29,6 +30,7 @@ impl Default for TokenKind {
     }
 }
 
+/// Token linked list
 #[derive(Debug, PartialEq, Default)]
 struct Token {
     kind: TokenKind,
@@ -37,23 +39,32 @@ struct Token {
 }
 
 impl Token {
-    fn consume_reserved(&self) -> Result<(char, &Token), CustomError> {
+    fn consume_reserved(&self) -> Option<(char, &Token)> {
         if let TokenKind::Reserved(c) = self.kind {
-            return Ok((c, self.next.as_ref().unwrap().as_ref()));
+            return Some((c, self.next.as_ref().unwrap().as_ref()));
         }
 
-        Err(CustomError(
+        None
+    }
+
+    fn expect_reserved(&self) -> Result<(char, &Token), CustomError> {
+        self.consume_reserved().ok_or(CustomError(
             "有効な文字ではありません".to_string(),
             self.loc,
         ))
     }
 
-    fn consume_number(&self) -> Result<(i64, &Token), CustomError> {
+    fn consume_number(&self) -> Option<(i64, &Token)> {
         if let TokenKind::Num(nr) = self.kind {
-            return Ok((nr, self.next.as_ref().unwrap().as_ref()));
+            return Some((nr, self.next.as_ref().unwrap().as_ref()));
         }
 
-        Err(CustomError("数字ではありません".to_string(), self.loc))
+        None
+    }
+
+    fn expect_number(&self) -> Result<(i64, &Token), CustomError> {
+        self.consume_number()
+            .ok_or(CustomError("数字ではありません".to_string(), self.loc))
     }
 
     fn is_eof(&self) -> bool {
@@ -135,19 +146,19 @@ fn run(input: &str) -> Result<(), CustomError> {
     println!(".globl main");
     println!("main:");
 
-    let (d, mut token) = token.consume_number()?;
+    let (d, mut token) = token.expect_number()?;
     println!("  mov rax, {}", d);
 
     while !token.is_eof() {
-        let (res, next) = token.consume_reserved()?;
+        let (res, next) = token.expect_reserved()?;
         let next = match res {
             '+' => {
-                let (d, next) = next.consume_number()?;
+                let (d, next) = next.expect_number()?;
                 println!("  add rax, {}", d);
                 next
             }
             '-' => {
-                let (d, next) = next.consume_number()?;
+                let (d, next) = next.expect_number()?;
                 println!("  sub rax, {}", d);
                 next
             }
