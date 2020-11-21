@@ -125,6 +125,102 @@ fn tokenise(p: &str) -> Result<Token, CustomError> {
     Ok(head.next.map(|b| *b).unwrap_or_default())
 }
 
+enum NodeKind {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Num(i64),
+}
+
+struct Node {
+    kind: NodeKind,
+    lhs: Option<Box<Node>>,
+    rhs: Option<Box<Node>>,
+}
+
+impl Node {
+    fn new(kind: NodeKind, lhs: Option<Node>, rhs: Option<Node>) -> Node {
+        Node {
+            kind,
+            lhs: lhs.map(|n| Box::new(n)),
+            rhs: rhs.map(|n| Box::new(n)),
+        }
+    }
+
+    fn new_number(n: i64) -> Node {
+        Node {
+            kind: NodeKind::Num(n),
+            lhs: None,
+            rhs: None,
+        }
+    }
+}
+
+fn expr(token: &Token) -> Result<(Node, &Token), CustomError> {
+    let (mut root, mut token) = mul(token)?;
+
+    loop {
+        let (node, next) = match token.consume_reserved() {
+            Some((c, next)) if c == '+' => {
+                let (rhs, next) = mul(next)?;
+                (Node::new(NodeKind::Add, Some(root), Some(rhs)), next)
+            }
+            Some((c, next)) if c == '-' => {
+                let (rhs, next) = mul(next)?;
+                (Node::new(NodeKind::Sub, Some(root), Some(rhs)), next)
+            }
+            _ => break,
+        };
+
+        root = node;
+        token = next;
+    }
+
+    Ok((root, token))
+}
+
+fn mul(token: &Token) -> Result<(Node, &Token), CustomError> {
+    let (mut root, mut token) = primary(token)?;
+
+    loop {
+        let (node, next) = match token.consume_reserved() {
+            Some((c, next)) if c == '*' => {
+                let (rhs, next) = primary(next)?;
+                (Node::new(NodeKind::Mul, Some(root), Some(rhs)), next)
+            }
+            Some((c, next)) if c == '/' => {
+                let (rhs, next) = primary(next)?;
+                (Node::new(NodeKind::Div, Some(root), Some(rhs)), next)
+            }
+            _ => break,
+        };
+
+        root = node;
+        token = next;
+    }
+
+    Ok((root, token))
+}
+
+fn primary(token: &Token) -> Result<(Node, &Token), CustomError> {
+    if let Some((c, next)) = token.consume_reserved() {
+        if c == '(' {
+            let (node, next) = expr(next)?;
+            let (c, next) = next.expect_reserved()?;
+            if c != ')' {
+                return Err(CustomError(format!("予期しない文字です: {}", c), next.loc));
+            }
+
+            return Ok((node, next));
+        }
+    }
+
+    token
+        .expect_number()
+        .map(|(n, next)| (Node::new_number(n), next))
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
