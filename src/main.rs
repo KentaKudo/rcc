@@ -17,6 +17,8 @@ impl fmt::Display for CustomError {
     }
 }
 
+type Result<T> = std::result::Result<T, CustomError>;
+
 #[derive(Debug, PartialEq)]
 enum TokenKind {
     Reserved(char),
@@ -47,7 +49,7 @@ impl Token {
         None
     }
 
-    fn expect_reserved(&self) -> Result<(char, &Token), CustomError> {
+    fn expect_reserved(&self) -> Result<(char, &Token)> {
         self.consume_reserved().ok_or(CustomError(
             "有効な文字ではありません".to_string(),
             self.loc,
@@ -62,7 +64,7 @@ impl Token {
         None
     }
 
-    fn expect_number(&self) -> Result<(i64, &Token), CustomError> {
+    fn expect_number(&self) -> Result<(i64, &Token)> {
         self.consume_number()
             .ok_or(CustomError("数字ではありません".to_string(), self.loc))
     }
@@ -82,7 +84,7 @@ impl Token {
     }
 }
 
-fn tokenise(p: &str) -> Result<Token, CustomError> {
+fn tokenise(p: &str) -> Result<Token> {
     let mut head = Token::default();
     let mut cur = &mut head;
 
@@ -157,7 +159,7 @@ impl Node {
     }
 }
 
-fn expr(token: &Token) -> Result<(Node, &Token), CustomError> {
+fn expr(token: &Token) -> Result<(Node, &Token)> {
     let (mut root, mut token) = mul(token)?;
 
     loop {
@@ -180,7 +182,7 @@ fn expr(token: &Token) -> Result<(Node, &Token), CustomError> {
     Ok((root, token))
 }
 
-fn mul(token: &Token) -> Result<(Node, &Token), CustomError> {
+fn mul(token: &Token) -> Result<(Node, &Token)> {
     let (mut root, mut token) = primary(token)?;
 
     loop {
@@ -203,7 +205,7 @@ fn mul(token: &Token) -> Result<(Node, &Token), CustomError> {
     Ok((root, token))
 }
 
-fn primary(token: &Token) -> Result<(Node, &Token), CustomError> {
+fn primary(token: &Token) -> Result<(Node, &Token)> {
     if let Some((c, next)) = token.consume_reserved() {
         if c == '(' {
             let (node, next) = expr(next)?;
@@ -235,7 +237,7 @@ fn main() {
     }
 }
 
-fn run(input: &str) -> Result<(), CustomError> {
+fn run(input: &str) -> Result<()> {
     let token = tokenise(input)?;
 
     println!(".intel_syntax noprefix");
@@ -304,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn successfully_tokenise() -> Result<(), CustomError> {
+    fn successfully_tokenise() -> Result<()> {
         assert_eq!(
             Token {
                 kind: TokenKind::Num(12),
@@ -337,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn tokenise_empty() -> Result<(), CustomError> {
+    fn tokenise_empty() -> Result<()> {
         assert_eq!(
             Token {
                 kind: TokenKind::EOF,
