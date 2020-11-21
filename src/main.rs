@@ -1,4 +1,20 @@
 use std::env;
+use std::fmt;
+use std::process;
+use std::str;
+
+#[derive(Debug, PartialEq, Default, Copy, Clone)]
+struct Location(u64);
+
+#[derive(Debug)]
+struct CustomError(String, Location);
+
+impl fmt::Display for CustomError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let CustomError(msg, loc) = self;
+        writeln!(f, "{}^ {}", " ".repeat(loc.0 as usize), msg)
+    }
+}
 
 #[derive(Debug, PartialEq)]
 enum TokenKind {
@@ -16,79 +32,104 @@ impl Default for TokenKind {
 #[derive(Debug, PartialEq, Default)]
 struct Token {
     kind: TokenKind,
+    loc: Location,
     next: Option<Box<Token>>,
 }
 
 impl Token {
-    fn consume_reserved(&self) -> Result<(char, &Token), String> {
+    fn consume_reserved(&self) -> Result<(char, &Token), CustomError> {
         if let TokenKind::Reserved(c) = self.kind {
             return Ok((c, self.next.as_ref().unwrap().as_ref()));
         }
 
-        Err("有効な文字ではありません".to_string())
+        Err(CustomError(
+            "有効な文字ではありません".to_string(),
+            self.loc,
+        ))
     }
 
-    fn consume_number(&self) -> Result<(i64, &Token), String> {
+    fn consume_number(&self) -> Result<(i64, &Token), CustomError> {
         if let TokenKind::Num(nr) = self.kind {
             return Ok((nr, self.next.as_ref().unwrap().as_ref()));
         }
 
-        Err("数字ではありません".to_string())
+        Err(CustomError("数字ではありません".to_string(), self.loc))
     }
 
     fn is_eof(&self) -> bool {
         return self.kind == TokenKind::EOF;
     }
 
-    fn append(&mut self, kind: TokenKind) -> &mut Token {
-        let t = Token { kind, next: None };
+    fn append(&mut self, kind: TokenKind, loc: Location) -> &mut Token {
+        let t = Token {
+            kind,
+            loc,
+            next: None,
+        };
         self.next = Some(Box::new(t));
         self.next.as_mut().unwrap()
     }
 }
 
-fn tokenise(p: &str) -> Result<Token, String> {
+fn tokenise(p: &str) -> Result<Token, CustomError> {
     let mut head = Token::default();
     let mut cur = &mut head;
 
     let mut input = p;
     while input != "" {
         let c = input.chars().nth(0).unwrap();
-        if c.is_ascii_whitespace() {
-            input = &input[1..];
-            continue;
-        }
+        let rest = match c {
+            _ if c.is_ascii_whitespace() => &input[1..],
+            _ if c == '+' || c == '-' => {
+                cur = cur.append(
+                    TokenKind::Reserved(c),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[1..]
+            }
+            _ if c.is_ascii_digit() => {
+                let (d, rest) = strtol(input);
+                cur = cur.append(
+                    TokenKind::Num(d.ok_or(CustomError(
+                        format!("予期しない文字です: {}", input),
+                        cur.loc,
+                    ))?),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                rest
+            }
+            _ => {
+                return Err(CustomError(
+                    "トークナイズできません".to_string(),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                ))
+            }
+        };
 
-        if c == '+' || c == '-' {
-            input = &input[1..];
-            cur = cur.append(TokenKind::Reserved(c));
-            continue;
-        }
-
-        if c.is_ascii_digit() {
-            let (d, rest) = strtol(input);
-            cur = cur.append(TokenKind::Num(
-                d.ok_or(format!("予期しない文字です: {}", input))?,
-            ));
-            input = rest;
-            continue;
-        }
-
-        return Err("トークナイズできません".to_string());
+        input = rest;
     }
 
-    cur.append(TokenKind::EOF);
+    cur.append(TokenKind::EOF, Location(p.chars().count() as u64));
 
     Ok(head.next.map(|b| *b).unwrap_or_default())
 }
 
-fn main() -> Result<(), String> {
+fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        return Err("引数の個数が正しくありません".to_string());
+        eprintln!("引数の個数が正しくありません");
+        process::exit(1);
     }
 
-    let token = tokenise(&args[1])?;
+    if let Err(e) = run(&args[1]) {
+        eprintln!("{}", &args[1]);
+        eprintln!("{}", e);
+        process::exit(1);
+    }
+}
+
+fn run(input: &str) -> Result<(), CustomError> {
+    let token = tokenise(input)?;
 
     println!(".intel_syntax noprefix");
     println!(".globl main");
@@ -110,7 +151,12 @@ fn main() -> Result<(), String> {
                 println!("  sub rax, {}", d);
                 next
             }
-            _ => return Err(format!("予期しない文字です: {}", res)),
+            _ => {
+                return Err(CustomError(
+                    format!("予期しない文字です: {}", res),
+                    token.loc,
+                ))
+            }
         };
 
         token = next;
@@ -151,20 +197,26 @@ mod tests {
     }
 
     #[test]
-    fn successfully_tokenise() -> Result<(), String> {
+    fn successfully_tokenise() -> Result<(), CustomError> {
         assert_eq!(
             Token {
                 kind: TokenKind::Num(12),
+                loc: Location(1),
                 next: Some(Box::new(Token {
                     kind: TokenKind::Reserved('+'),
+                    loc: Location(4),
                     next: Some(Box::new(Token {
                         kind: TokenKind::Num(34),
+                        loc: Location(6),
                         next: Some(Box::new(Token {
                             kind: TokenKind::Reserved('-'),
+                            loc: Location(9),
                             next: Some(Box::new(Token {
                                 kind: TokenKind::Num(5),
+                                loc: Location(11),
                                 next: Some(Box::new(Token {
                                     kind: TokenKind::EOF,
+                                    loc: Location(13),
                                     next: None,
                                 }))
                             }))
@@ -178,10 +230,11 @@ mod tests {
     }
 
     #[test]
-    fn tokenise_empty() -> Result<(), String> {
+    fn tokenise_empty() -> Result<(), CustomError> {
         assert_eq!(
             Token {
                 kind: TokenKind::EOF,
+                loc: Location(2),
                 next: None,
             },
             tokenise("  ")?
