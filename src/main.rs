@@ -160,11 +160,11 @@ fn expr(token: &Token) -> Result<(Node, &Token)> {
 
     loop {
         let (node, next) = match token.consume_reserved() {
-            Some((c, next)) if c == '+' => {
+            Some(('+', next)) => {
                 let (rhs, next) = mul(next)?;
                 (Node::new(NodeKind::Add, Some(root), Some(rhs)), next)
             }
-            Some((c, next)) if c == '-' => {
+            Some(('-', next)) => {
                 let (rhs, next) = mul(next)?;
                 (Node::new(NodeKind::Sub, Some(root), Some(rhs)), next)
             }
@@ -179,16 +179,16 @@ fn expr(token: &Token) -> Result<(Node, &Token)> {
 }
 
 fn mul(token: &Token) -> Result<(Node, &Token)> {
-    let (mut root, mut token) = primary(token)?;
+    let (mut root, mut token) = unary(token)?;
 
     loop {
         let (node, next) = match token.consume_reserved() {
-            Some((c, next)) if c == '*' => {
-                let (rhs, next) = primary(next)?;
+            Some(('*', next)) => {
+                let (rhs, next) = unary(next)?;
                 (Node::new(NodeKind::Mul, Some(root), Some(rhs)), next)
             }
-            Some((c, next)) if c == '/' => {
-                let (rhs, next) = primary(next)?;
+            Some(('/', next)) => {
+                let (rhs, next) = unary(next)?;
                 (Node::new(NodeKind::Div, Some(root), Some(rhs)), next)
             }
             _ => break,
@@ -201,17 +201,27 @@ fn mul(token: &Token) -> Result<(Node, &Token)> {
     Ok((root, token))
 }
 
-fn primary(token: &Token) -> Result<(Node, &Token)> {
-    if let Some((c, next)) = token.consume_reserved() {
-        if c == '(' {
-            let (node, next) = expr(next)?;
-            let (c, next) = next.expect_reserved()?;
-            if c != ')' {
-                return Err(CustomError(format!("予期しない文字です: {}", c), next.loc));
-            }
-
-            return Ok((node, next));
+fn unary(token: &Token) -> Result<(Node, &Token)> {
+    match token.consume_reserved() {
+        Some(('+', next)) => primary(next),
+        Some(('-', next)) => {
+            let (rhs, next) = primary(next)?;
+            let node = Node::new(NodeKind::Sub, Some(Node::new_number(0)), Some(rhs));
+            Ok((node, next))
         }
+        _ => primary(token),
+    }
+}
+
+fn primary(token: &Token) -> Result<(Node, &Token)> {
+    if let Some(('(', next)) = token.consume_reserved() {
+        let (node, next) = expr(next)?;
+        let (c, next) = next.expect_reserved()?;
+        if c != ')' {
+            return Err(CustomError(format!("予期しない文字です: {}", c), next.loc));
+        }
+
+        return Ok((node, next));
     }
 
     token
