@@ -21,7 +21,7 @@ type Result<T> = std::result::Result<T, CustomError>;
 
 #[derive(Debug, PartialEq)]
 enum TokenKind {
-    Reserved(char),
+    Reserved(&'static str),
     Num(i64),
     EOF,
 }
@@ -41,15 +41,15 @@ struct Token {
 }
 
 impl Token {
-    fn consume_reserved(&self) -> Option<(char, &Self)> {
-        if let TokenKind::Reserved(c) = self.kind {
-            return Some((c, self.next.as_ref().unwrap().as_ref()));
+    fn consume_reserved(&self) -> Option<(&str, &Self)> {
+        if let TokenKind::Reserved(s) = self.kind {
+            return Some((s, self.next.as_ref().unwrap().as_ref()));
         }
 
         None
     }
 
-    fn expect_reserved(&self) -> Result<(char, &Self)> {
+    fn expect_reserved(&self) -> Result<(&str, &Self)> {
         self.consume_reserved().ok_or(CustomError(
             "有効な文字ではありません".to_string(),
             self.loc,
@@ -89,9 +89,86 @@ fn tokenise(p: &str) -> Result<Token> {
         let c = input.chars().nth(0).unwrap();
         let rest = match c {
             _ if c.is_ascii_whitespace() => &input[1..],
-            _ if ['+', '-', '*', '/', '(', ')'].contains(&c) => {
+            '=' if input.chars().nth(1).filter(|c| *c == '=').is_some() => {
                 cur = cur.append(
-                    TokenKind::Reserved(c),
+                    TokenKind::Reserved("=="),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[2..]
+            }
+            '!' if input.chars().nth(1).filter(|c| *c == '=').is_some() => {
+                cur = cur.append(
+                    TokenKind::Reserved("!="),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[2..]
+            }
+            '>' if input.chars().nth(1).filter(|c| *c == '=').is_some() => {
+                cur = cur.append(
+                    TokenKind::Reserved(">="),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[2..]
+            }
+            '<' if input.chars().nth(1).filter(|c| *c == '=').is_some() => {
+                cur = cur.append(
+                    TokenKind::Reserved("<="),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[2..]
+            }
+            '+' => {
+                cur = cur.append(
+                    TokenKind::Reserved("+"),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[1..]
+            }
+            '-' => {
+                cur = cur.append(
+                    TokenKind::Reserved("-"),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[1..]
+            }
+            '*' => {
+                cur = cur.append(
+                    TokenKind::Reserved("*"),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[1..]
+            }
+            '/' => {
+                cur = cur.append(
+                    TokenKind::Reserved("/"),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[1..]
+            }
+            '(' => {
+                cur = cur.append(
+                    TokenKind::Reserved("("),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[1..]
+            }
+            ')' => {
+                cur = cur.append(
+                    TokenKind::Reserved(")"),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[1..]
+            }
+            '<' => {
+                cur = cur.append(
+                    TokenKind::Reserved("<"),
+                    Location((p.chars().count() - input.chars().count()) as u64),
+                );
+                &input[1..]
+            }
+            '>' => {
+                cur = cur.append(
+                    TokenKind::Reserved(">"),
                     Location((p.chars().count() - input.chars().count()) as u64),
                 );
                 &input[1..]
@@ -128,6 +205,10 @@ enum NodeKind {
     Sub,
     Mul,
     Div,
+    Equal,
+    NotEqual,
+    Less,
+    LessOrEqual,
     Num(i64),
 }
 
@@ -156,15 +237,79 @@ impl Node {
 }
 
 fn expr(token: &Token) -> Result<(Node, &Token)> {
+    equality(token)
+}
+
+fn equality(token: &Token) -> Result<(Node, &Token)> {
+    let (mut root, mut token) = relational(token)?;
+
+    loop {
+        let (node, next) = match token.consume_reserved() {
+            Some(("==", next)) => {
+                let (rhs, next) = relational(next)?;
+                (Node::new(NodeKind::Equal, Some(root), Some(rhs)), next)
+            }
+            Some(("!=", next)) => {
+                let (rhs, next) = relational(next)?;
+                (Node::new(NodeKind::NotEqual, Some(root), Some(rhs)), next)
+            }
+            _ => break,
+        };
+
+        root = node;
+        token = next;
+    }
+
+    Ok((root, token))
+}
+
+fn relational(token: &Token) -> Result<(Node, &Token)> {
+    let (mut root, mut token) = add(token)?;
+
+    loop {
+        let (node, next) = match token.consume_reserved() {
+            Some((">", next)) => {
+                let (lhs, next) = add(next)?;
+                (Node::new(NodeKind::Less, Some(lhs), Some(root)), next)
+            }
+            Some((">=", next)) => {
+                let (lhs, next) = add(next)?;
+                (
+                    Node::new(NodeKind::LessOrEqual, Some(lhs), Some(root)),
+                    next,
+                )
+            }
+            Some(("<", next)) => {
+                let (rhs, next) = add(next)?;
+                (Node::new(NodeKind::Less, Some(root), Some(rhs)), next)
+            }
+            Some(("<=", next)) => {
+                let (rhs, next) = add(next)?;
+                (
+                    Node::new(NodeKind::LessOrEqual, Some(root), Some(rhs)),
+                    next,
+                )
+            }
+            _ => break,
+        };
+
+        root = node;
+        token = next;
+    }
+
+    Ok((root, token))
+}
+
+fn add(token: &Token) -> Result<(Node, &Token)> {
     let (mut root, mut token) = mul(token)?;
 
     loop {
         let (node, next) = match token.consume_reserved() {
-            Some(('+', next)) => {
+            Some(("+", next)) => {
                 let (rhs, next) = mul(next)?;
                 (Node::new(NodeKind::Add, Some(root), Some(rhs)), next)
             }
-            Some(('-', next)) => {
+            Some(("-", next)) => {
                 let (rhs, next) = mul(next)?;
                 (Node::new(NodeKind::Sub, Some(root), Some(rhs)), next)
             }
@@ -183,11 +328,11 @@ fn mul(token: &Token) -> Result<(Node, &Token)> {
 
     loop {
         let (node, next) = match token.consume_reserved() {
-            Some(('*', next)) => {
+            Some(("*", next)) => {
                 let (rhs, next) = unary(next)?;
                 (Node::new(NodeKind::Mul, Some(root), Some(rhs)), next)
             }
-            Some(('/', next)) => {
+            Some(("/", next)) => {
                 let (rhs, next) = unary(next)?;
                 (Node::new(NodeKind::Div, Some(root), Some(rhs)), next)
             }
@@ -203,8 +348,8 @@ fn mul(token: &Token) -> Result<(Node, &Token)> {
 
 fn unary(token: &Token) -> Result<(Node, &Token)> {
     match token.consume_reserved() {
-        Some(('+', next)) => primary(next),
-        Some(('-', next)) => {
+        Some(("+", next)) => primary(next),
+        Some(("-", next)) => {
             let (rhs, next) = primary(next)?;
             let node = Node::new(NodeKind::Sub, Some(Node::new_number(0)), Some(rhs));
             Ok((node, next))
@@ -214,10 +359,10 @@ fn unary(token: &Token) -> Result<(Node, &Token)> {
 }
 
 fn primary(token: &Token) -> Result<(Node, &Token)> {
-    if let Some(('(', next)) = token.consume_reserved() {
+    if let Some(("(", next)) = token.consume_reserved() {
         let (node, next) = expr(next)?;
         let (c, next) = next.expect_reserved()?;
-        if c != ')' {
+        if c != ")" {
             return Err(CustomError(format!("予期しない文字です: {}", c), next.loc));
         }
 
@@ -248,6 +393,26 @@ fn gen(node: &Node) {
         NodeKind::Div => {
             println!("  cqo");
             println!("  idiv rdi");
+        }
+        NodeKind::Equal => {
+            println!("  cmp rax, rdi");
+            println!("  sete al");
+            println!("  movzb rax, al");
+        }
+        NodeKind::NotEqual => {
+            println!("  cmp rax, rdi");
+            println!("  setne al");
+            println!("  movzb rax, al");
+        }
+        NodeKind::Less => {
+            println!("  cmp rax, rdi");
+            println!("  setl al");
+            println!("  movzb rax, al");
+        }
+        NodeKind::LessOrEqual => {
+            println!("  cmp rax, rdi");
+            println!("  setle al");
+            println!("  movzb rax, al");
         }
         _ => {}
     }
@@ -321,13 +486,13 @@ mod tests {
                 kind: TokenKind::Num(12),
                 loc: Location(1),
                 next: Some(Box::new(Token {
-                    kind: TokenKind::Reserved('+'),
+                    kind: TokenKind::Reserved("+"),
                     loc: Location(4),
                     next: Some(Box::new(Token {
                         kind: TokenKind::Num(34),
                         loc: Location(6),
                         next: Some(Box::new(Token {
-                            kind: TokenKind::Reserved('-'),
+                            kind: TokenKind::Reserved("-"),
                             loc: Location(9),
                             next: Some(Box::new(Token {
                                 kind: TokenKind::Num(5),
@@ -344,6 +509,48 @@ mod tests {
             },
             tokenise(" 12 + 34 - 5 ")?
         );
+
+        assert_eq!(
+            Token {
+                kind: TokenKind::Num(20),
+                loc: Location(0),
+                next: Some(Box::new(Token {
+                    kind: TokenKind::Reserved("-"),
+                    loc: Location(2),
+                    next: Some(Box::new(Token {
+                        kind: TokenKind::Num(3),
+                        loc: Location(3),
+                        next: Some(Box::new(Token {
+                            kind: TokenKind::Reserved("*"),
+                            loc: Location(4),
+                            next: Some(Box::new(Token {
+                                kind: TokenKind::Reserved("+"),
+                                loc: Location(5),
+                                next: Some(Box::new(Token {
+                                    kind: TokenKind::Num(5),
+                                    loc: Location(6),
+                                    next: Some(Box::new(Token {
+                                        kind: TokenKind::Reserved("<="),
+                                        loc: Location(8),
+                                        next: Some(Box::new(Token {
+                                            kind: TokenKind::Num(5),
+                                            loc: Location(11),
+                                            next: Some(Box::new(Token {
+                                                kind: TokenKind::EOF,
+                                                loc: Location(12),
+                                                next: None,
+                                            }))
+                                        }))
+                                    })),
+                                }))
+                            }))
+                        }))
+                    }))
+                }))
+            },
+            tokenise("20-3*+5 <= 5")?
+        );
+
         Ok(())
     }
 
